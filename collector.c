@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include "span.h"
 
 #define MAX_SPANS 256
@@ -15,11 +16,23 @@ static int n = 0;
 static int span_parsear(char *linea, Span *s) {
     char *campos[9];
     char *p = linea;
+    char *fin;
 
     linea[strcspn(linea, "\n")] = '\0';
     for (int i = 0; i < 9; i++) {
         campos[i] = strsep(&p, "|");
         if (campos[i] == NULL) return -1;   /* línea incompleta */
+    }
+    if (p != NULL || !id_valido(campos[0]) || !id_valido(campos[1]) ||
+        (campos[2][0] != '\0' && !id_valido(campos[2])) ||
+        (strcmp(campos[3], "api") != 0 &&
+         strcmp(campos[3], "inventario") != 0 &&
+         strcmp(campos[3], "pagos") != 0) ||
+        (strcmp(campos[4], "recibir_solicitud") != 0 &&
+         strcmp(campos[4], "verificar_stock") != 0 &&
+         strcmp(campos[4], "cobrar") != 0) ||
+        (strcmp(campos[8], "OK") != 0 && strcmp(campos[8], "ERROR") != 0)) {
+        return -1;
     }
 
     snprintf(s->trace_id, ID_LEN, "%s", campos[0]);
@@ -27,9 +40,16 @@ static int span_parsear(char *linea, Span *s) {
     snprintf(s->parent_span_id, ID_LEN, "%s", campos[2]);
     snprintf(s->servicio, NAME_LEN, "%s", campos[3]);
     snprintf(s->operacion, NAME_LEN, "%s", campos[4]);
-    s->inicio_ms = atof(campos[5]);
-    s->fin_ms = atof(campos[6]);
-    s->duracion_ms = atof(campos[7]);
+    errno = 0;
+    s->inicio_ms = strtod(campos[5], &fin);
+    if (errno || *fin != '\0') return -1;
+    errno = 0;
+    s->fin_ms = strtod(campos[6], &fin);
+    if (errno || *fin != '\0') return -1;
+    errno = 0;
+    s->duracion_ms = strtod(campos[7], &fin);
+    if (errno || *fin != '\0' || s->duracion_ms < 0.0 ||
+        s->fin_ms < s->inicio_ms) return -1;
     snprintf(s->estado, sizeof(s->estado), "%s", campos[8]);
     return 0;
 }
@@ -53,12 +73,23 @@ static void imprimir_arbol(const char *trace, const char *padre, int nivel) {
 
 int main(void) {
     char linea[512];
+    int invalidas = 0;
 
     /* 1. Recolectar hasta EOF */
     while (fgets(linea, sizeof(linea), stdin) != NULL) {
-        if (n >= MAX_SPANS) break;
+        if (n >= MAX_SPANS) {
+            invalidas++;
+            continue;
+        }
         if (span_parsear(linea, &spans[n]) == 0) n++;
+        else invalidas++;
     }
+    if (ferror(stdin)) {
+        perror("fgets collector");
+        return 1;
+    }
+    if (invalidas > 0)
+        fprintf(stderr, "collector descartó %d línea(s) inválida(s)\n", invalidas);
 
     /* 2. Mostrar agrupado por Trace ID */
     printf("\n===== TraceLite: %d spans recibidos =====\n", n);

@@ -19,24 +19,24 @@ TraceLite – Avance parcial
 
 2. Descripción del proyecto
 Qué es TraceLite y qué problema resuelve (seguir una solicitud a través de varios procesos).
-Objetivo del avance: que una solicitud recorra al menos dos procesos, genere spans con un mismo Trace ID y llegue a un collector por IPC.
+Objetivo del avance: que una solicitud recorra tres servicios, genere spans con un mismo Trace ID, valide stock antes del pago y llegue a un collector por IPC.
 Alcance: qué incluye esta versión y qué queda para la entrega final.
 Conceptos básicos: traza, span, Trace ID, Span ID, Parent Span ID, propagación de contexto.
 
 3. Arquitectura de software
 El diagrama que hicimos.
-Una explicación breve de los componentes: main, servicio A (api), servicio B (pagos) y collector.
+Una explicación breve de los componentes: main, servicio A (api), servicio inventario, servicio B (pagos) y collector.
 Estructura de archivos del código (main.c, services.c, collector.c, span.h, Makefile).
 
 4. Modelo de procesos
-Cuántos procesos existen y cuál es la relación padre-hijo entre ellos.
+Cuántos procesos existen y cuál es la relación padre-hijo entre ellos, incluyendo inventario.
 Cuáles se crean con fork() y cuál con exec().
 Tabla con la responsabilidad de cada proceso.
 Ciclo de vida: creación, cierre de descriptores, waitpid y finalización.
 
 5. Mecanismo IPC
 Qué mecanismo elegiste (pipes) y por qué: comunicación local, procesos emparentados por fork(), simplicidad.
-Tabla de las tres pipes (pipe_ab, pipe_ba, pipe_spans) con dirección y contenido.
+Tabla de las cinco pipes (pipe_ai, pipe_ib, pipe_bi, pipe_ia, pipe_spans) con dirección y contenido.
 Detalles técnicos: uso de dup2 para el collector, cierre de extremos no usados (EOF) y una sola write() por línea para que los mensajes no se mezclen.
 
 6. Formato del span
@@ -46,13 +46,14 @@ Un ejemplo real, copiado de tu ejecución.
 Cómo se miden los tiempos (clock_gettime(CLOCK_MONOTONIC)).
 
 7. Propagación de contexto
-Cómo viaja el Trace ID y el Span ID de A hacia B.
-Cómo B usa el Span ID de A como su parent_span_id y genera el suyo.
+Cómo viaja el Trace ID y el Span ID de A hacia inventario y luego hacia B.
+Cómo inventario usa el Span ID de A como su parent_span_id y B usa el Span ID de inventario como el suyo.
+Cómo inventario verifica el stock y evita ejecutar el pago si no hay disponibilidad.
 Cómo se reconstruye el árbol padre-hijo en el collector.
 
 8. Pruebas y resultados
 Cómo se ejecutó (make y ./main).
-Capturas de pantalla de al menos 3 trazas correlacionadas.
+Capturas de pantalla de al menos 3 trazas correlacionadas, incluyendo una solicitud rechazada por falta de stock.
 La anomalía: retraso aleatorio y error, con captura y una explicación de dónde se ve en el span.
 Análisis breve de la salida (por ejemplo, que la duración del padre incluye la del hijo).
 
@@ -62,6 +63,7 @@ Una tabla con lo implementado y lo pendiente para la entrega final. Puedes basar
 
 Funcionalidad	Estado
 Servicios/procesos con fork() y exec()	Implementado
+Servicio inventario verifica stock antes del pago	Implementado
 Spans con identificadores, tiempos y estado	Implementado
 Propagación de contexto entre servicios	Implementado
 Spans enviados al collector por IPC	Implementado

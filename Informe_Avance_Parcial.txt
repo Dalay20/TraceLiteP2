@@ -1,0 +1,250 @@
+Práctica #2:
+Proyecto parcial - primer avance
+
+1. PORTADA
+
+Universidad: ESCUELA SUPERIOR POLITÉCNICA DEL LITORAL
+Carrera: COMPUTACIÓN
+Asignatura: SISTEMAS OPERATIVOS - II PAO 2026
+Estudiante: DIEGO JAVIER ALAY MOSQUERA
+Docente: Criollo Bonilla Ronald Raul
+Título: TraceLite - Avance parcial
+
+2. DESCRIPCIÓN DEL PROYECTO
+
+TraceLite es una implementación ligera de trazabilidad distribuida en C para
+GNU/Linux, inspirada en OpenTelemetry y Grafana Tempo. Permite seguir una
+solicitud mientras atraviesa varios procesos y relacionar sus operaciones con
+identificadores comunes.
+
+El objetivo de este avance es que una solicitud recorra tres servicios, genere
+spans con el mismo Trace ID y los envíe a un collector mediante IPC. El flujo
+es api -> inventario -> pagos. Inventario verifica y reserva stock antes de
+permitir que se realice el pago.
+
+Esta versión incluye:
+
+- Un proceso principal, tres servicios y un collector independiente.
+- Propagación del Trace ID y del Span ID padre.
+- Cinco pipes anónimas para comunicación local.
+- Verificación y reserva de stock antes del cobro.
+- Cuatro solicitudes y spans agrupados por Trace ID.
+- Simulación de retrasos y errores en pagos.
+
+La entrega final puede ampliar el sistema con un dashboard, más servicios,
+persistencia de trazas y las funcionalidades adicionales que defina el
+enunciado final.
+
+Conceptos básicos:
+
+- Traza: recorrido completo de una solicitud.
+- Span: unidad de trabajo registrada dentro de una traza.
+- Trace ID: identificador común de todos los spans de una solicitud.
+- Span ID: identificador único de un span.
+- Parent Span ID: identificador del span que originó la operación actual.
+- Propagación de contexto: envío de identificadores entre procesos.
+
+3. ARQUITECTURA DE SOFTWARE
+
+La arquitectura está formada por main, api, inventario, pagos y collector:
+
+main
+|-- fork + exec -> collector
+|-- fork -------> pagos
+|-- fork -------> inventario
+`-- fork -------> api
+
+Flujo de una solicitud: api -> inventario -> pagos -> respuesta a api
+Flujo de spans: api, inventario y pagos -> collector
+
+El proceso main crea las cinco pipes y lanza los procesos hijos. Api genera el
+Trace ID y el span raíz, envía el contexto a inventario y espera el resultado.
+Inventario verifica y reserva stock; solo cuando hay disponibilidad envía el
+contexto a pagos. Pagos ejecuta el cobro y devuelve su resultado a inventario,
+que lo reenvía a api. Los tres servicios envían sus spans al collector, que los
+agrupa por Trace ID y reconstruye la jerarquía.
+
+Archivos:
+
+- main.c: crea las pipes, ejecuta fork/exec y espera los procesos.
+- services.c: implementa api, inventario y pagos.
+- services.h: declara las funciones de los servicios.
+- collector.c: recibe, agrupa e imprime los spans.
+- span.h: define Span, tiempos, IDs y serialización.
+- makefile: reglas de compilación.
+- README.md: instrucciones y descripción técnica.
+
+4. MODELO DE PROCESOS
+
+Durante la ejecución existen cinco procesos: main, collector, api, inventario y
+pagos. Collector se crea mediante fork() y se reemplaza con exec("./collector").
+Los tres servicios se crean mediante fork().
+
+Proceso          Responsabilidad
+---------------  ------------------------------------------------------------
+main             Crea pipes, lanza procesos, cierra descriptores y usa waitpid.
+api              Genera la traza y el span raíz, propaga contexto a inventario,
+                 espera el resultado y envía su span.
+inventario       Verifica y reserva stock, genera un span hijo de api y
+                 coordina el paso hacia pagos.
+pagos            Ejecuta cobrar después de la validación y genera un span hijo
+                 de inventario.
+collector        Lee spans, agrupa por Trace ID y muestra el árbol.
+
+Ciclo de vida:
+
+1. main crea pipe_spans, pipe_ai, pipe_ib, pipe_bi y pipe_ia.
+2. Collector conecta pipe_spans[0] a STDIN_FILENO mediante dup2() y ejecuta
+   ./collector con execl().
+3. main crea api, inventario y pagos con fork().
+4. Cada proceso cierra los extremos de pipes que no utiliza.
+5. Api procesa cuatro solicitudes y cierra pipe_ai al terminar.
+6. Inventario recibe EOF, cierra pipe_ib y finaliza; pagos recibe EOF y termina.
+7. El collector termina cuando recibe EOF en su entrada estándar.
+8. main usa waitpid() para esperar a api, inventario, pagos y collector.
+
+5. MECANISMO IPC
+
+Se usan pipes anónimas porque la comunicación es local, los procesos son
+emparentados por fork() y el mecanismo es sencillo y suficiente para el flujo
+secuencial.
+
+Pipe          Dirección                    Contenido
+------------  ---------------------------  ----------------------------------
+pipe_ai       api -> inventario            Trace ID, Span ID de api y número.
+pipe_ib       inventario -> pagos          Trace ID, Span ID de inventario y
+                                           número de solicitud.
+pipe_bi       pagos -> inventario          Resultado del pago: OK o ERROR.
+pipe_ia       inventario -> api            Resultado final: OK o ERROR.
+pipe_spans    api, inventario y pagos ->   Una línea serializada por span.
+              collector
+
+El collector recibe pipe_spans[0] como entrada estándar mediante dup2() antes
+de exec. Cada span se envía con una sola write() y su tamaño es menor que
+PIPE_BUF, evitando que los mensajes se mezclen. El cierre de extremos no usados
+permite que EOF llegue correctamente a los procesos consumidores.
+
+6. FORMATO DEL SPAN
+
+trace_id|span_id|parent_span_id|servicio|operacion|inicio_ms|fin_ms|duracion_ms|estado
+
+Campo             Descripción
+----------------  ------------------------------------------------------------
+trace_id          Identificador compartido por la solicitud.
+span_id           Identificador único de la operación.
+parent_span_id    Span ID del padre; vacío en el span raíz.
+servicio          api, inventario o pagos.
+operacion         recibir_solicitud, verificar_stock o cobrar.
+inicio_ms         Instante inicial en milisegundos.
+fin_ms            Instante final en milisegundos.
+duracion_ms       Diferencia entre fin_ms e inicio_ms.
+estado            OK o ERROR.
+
+Ejemplo de una traza con los tres servicios:
+
+trace|span_api||api|recibir_solicitud|1000.0|1200.0|200.0|OK
+trace|span_inv|span_api|inventario|verificar_stock|1020.0|1052.0|32.0|OK
+trace|span_pago|span_inv|pagos|cobrar|1060.0|1180.0|120.0|OK
+
+Los tiempos se miden con clock_gettime(CLOCK_MONOTONIC), un reloj que no
+depende de cambios en la fecha u hora del sistema.
+
+7. PROPAGACIÓN DE CONTEXTO
+
+1. Api genera un Trace ID y su Span ID, y envía ambos por pipe_ai.
+2. Inventario conserva el Trace ID y usa el Span ID de api como parent_span_id.
+3. Si hay stock, inventario genera su span y envía su Span ID a pagos por
+   pipe_ib.
+4. Pagos usa el Span ID de inventario como parent_span_id y genera el suyo.
+5. El resultado de pagos regresa por pipe_bi y luego inventario lo envía a api
+   por pipe_ia.
+6. Si no hay stock, inventario responde ERROR directamente y no se ejecuta
+   pagos.
+
+El collector identifica el span raíz porque su parent_span_id está vacío.
+Después busca spans cuyo parent_span_id coincide con el span_id de otro span,
+reconstruyendo api -> inventario -> pagos.
+
+8. PRUEBAS Y RESULTADOS
+
+La compilación y ejecución se realizaron con:
+
+make
+./main
+
+La ejecución terminó correctamente y produjo:
+
+- 11 spans recibidos.
+- 4 spans de api.
+- 4 spans de inventario.
+- 3 spans de pagos, porque la cuarta solicitud no tuvo stock.
+- Cuatro Trace ID agrupados por el collector.
+
+Salida representativa:
+
+===== TraceLite: 11 spans recibidos =====
+
+Trace 672c1570721b5ea1
+└─ [api] recibir_solicitud 221.6 ms ERROR
+    └─ [inventario] verificar_stock 32.1 ms OK
+        └─ [pagos] cobrar 134.1 ms ERROR
+
+Trace 574a221d533e7dc6
+└─ [api] recibir_solicitud 152.5 ms OK
+    └─ [inventario] verificar_stock 30.1 ms OK
+        └─ [pagos] cobrar 57.1 ms OK
+
+Trace 4b236b454c8ccc88
+└─ [api] recibir_solicitud 82.4 ms ERROR
+    └─ [inventario] verificar_stock 22.1 ms ERROR
+
+Inventario inicia con tres unidades disponibles. Cada solicitud aprobada
+reserva una unidad antes de llamar a pagos; por eso la cuarta solicitud termina
+con ERROR por falta de stock y no genera un span de pago. Además, pagos puede
+introducir un retraso aleatorio de 300 a 500 ms con una probabilidad del 25 %,
+errores aleatorios con una probabilidad del 10 % y la solicitud número 3
+siempre termina en ERROR.
+
+La duración del span de api incluye la espera de inventario y pagos. Por ello
+el span padre normalmente dura más que cada span hijo. La relación de tres
+niveles confirma que el contexto se conserva durante todo el flujo.
+
+9. CHECKLIST DE FUNCIONALIDADES
+
+Funcionalidad                                      Estado
+-------------------------------------------------  ---------------------------
+Procesos con fork() y exec()                      Implementado
+Tres servicios y un collector                     Implementado
+Spans con IDs, tiempos y estado                   Implementado
+Propagación de contexto entre servicios           Implementado
+Verificación de stock antes del pago              Implementado
+Comunicación por pipes hacia el collector         Implementado
+Trazas agrupadas por Trace ID                     Implementado
+Árbol api -> inventario -> pagos                  Implementado
+Anomalías de retraso y error                      Implementado
+Informe, código, Makefile, README y video         Según avance
+Dashboard o visualización periódica               Pendiente
+Persistencia y más servicios                      Pendiente
+
+10. CONCLUSIONES Y TRABAJO FUTURO
+
+Este avance amplía TraceLite con inventario como servicio intermediario. Se
+practicó la coordinación de tres servicios, la propagación encadenada del
+contexto, la reserva de stock y el uso de varias pipes para solicitudes y
+respuestas.
+
+La solución demuestra que una solicitud no debe llegar a pagos si inventario no
+confirma disponibilidad. El collector puede representar tanto un flujo
+completo api -> inventario -> pagos como un flujo rechazado en inventario.
+
+Para la entrega final se puede añadir un dashboard con actualización periódica,
+persistencia de trazas, más productos y servicios, y pruebas automatizadas.
+
+11. REFERENCIAS
+
+1. OpenTelemetry. Traces:
+   https://opentelemetry.io/docs/concepts/signals/traces/
+2. OpenTelemetry. Context propagation:
+   https://opentelemetry.io/docs/concepts/context-propagation/
+3. Grafana Tempo:
+   https://grafana.com/docs/tempo/latest/
