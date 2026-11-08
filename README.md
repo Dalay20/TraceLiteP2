@@ -147,8 +147,13 @@ Trace 78953f5f7e6a1357
 
 Trace 00edba1d64fdc032
 └─ [api] recibir_solicitud       182.3 ms  ERROR (span 6d18ea0069227993, padre: -)
-    └─ [pagos] cobrar             142.1 ms  ERROR (span 756b9dfd16554a12, padre: 6d18ea0069227993)
+    └─ [inventario] verificar_stock 32.1 ms  OK (span 74b0dc5166334873, padre: 6d18ea0069227993)
+        └─ [pagos] cobrar             142.1 ms  ERROR (span 756b9dfd16554a12, padre: 74b0dc5166334873)
 ```
+
+Cuando inventario detecta falta de stock, la traza termina en ese servicio y
+no se genera un span de pagos. Cuando sí hay stock, pagos siempre aparece como
+hijo de inventario, incluso si el cobro termina con ERROR.
 
 ## Estado del avance
 
