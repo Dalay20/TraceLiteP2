@@ -57,7 +57,8 @@ el Span ID de inventario como parent_span_id. Por tanto, la relación queda:
 4. Persistencia
 --------------
 
-El collector abre traces.log en modo append. Cada span válido se vuelve a
+El collector abre traces.log en modo append. Si el archivo está vacío,
+primero escribe el encabezado con los nueve campos del span. Cada span válido se vuelve a
 serializar y se escribe en una línea del archivo. Los registros permanecen
 después de terminar el programa y las ejecuciones posteriores se agregan sin
 sobrescribir los datos anteriores.
@@ -79,7 +80,15 @@ El collector genera una alerta cuando:
 - el estado del span es ERROR; o
 - su duración supera 300 ms.
 
-Cada alerta muestra el servicio, el Trace ID y el motivo detectado.
+Cada alerta muestra el servicio, el Trace ID y el motivo detectado. El motivo
+incluye una descripción funcional:
+
+- pagos con ERROR indica que el cobro no pudo completarse;
+- inventario con ERROR indica que no hay producto disponible;
+- api con ERROR indica que no se logró completar la solicitud final;
+- una duración excesiva en pagos indica demora en el cobro;
+- una duración excesiva en inventario indica demora al verificar stock;
+- una duración excesiva en api indica demora en el flujo completo.
 
 El modo normal desactiva estas anomalías para permitir una prueba sin alertas.
 

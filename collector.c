@@ -16,9 +16,21 @@ static int alertas = 0;
 static void detectar_anomalia(const Span *span) {
     const char *motivo = NULL;
     if (strcmp(span->estado, "ERROR") == 0) {
-        motivo = "estado ERROR";
+        if (strcmp(span->servicio, "pagos") == 0) {
+            motivo = "el cobro no pudo completarse";
+        } else if (strcmp(span->servicio, "inventario") == 0) {
+            motivo = "no hay producto disponible";
+        } else {
+            motivo = "no se logró completar la solicitud final";
+        }
     } else if (span->duracion_ms > UMBRAL_DURACION_MS) {
-        motivo = "duración superior a 300 ms";
+        if (strcmp(span->servicio, "pagos") == 0) {
+            motivo = "demora excesiva en el cobro";
+        } else if (strcmp(span->servicio, "inventario") == 0) {
+            motivo = "demora excesiva al verificar disponibilidad";
+        } else {
+            motivo = "demora excesiva en el flujo completo";
+        }
     }
 
     if (motivo != NULL) {
@@ -107,9 +119,21 @@ static int contar_trazas(void) {
 int main(void) {
     char linea[512];
     int invalidas = 0;
-    FILE *persistencia = fopen(TRACE_LOG, "a");
+    FILE *persistencia = fopen(TRACE_LOG, "a+");
     if (persistencia == NULL) {
         perror("fopen traces.log");
+        return 1;
+    }
+    if (fseek(persistencia, 0, SEEK_END) != 0) {
+        perror("fseek traces.log");
+        fclose(persistencia);
+        return 1;
+    }
+    if (ftell(persistencia) == 0 &&
+        fputs("trace_id|span_id|parent_span_id|servicio|operacion|inicio_ms|fin_ms|duracion_ms|estado\n",
+              persistencia) == EOF) {
+        perror("encabezado traces.log");
+        fclose(persistencia);
         return 1;
     }
 

@@ -51,7 +51,8 @@ puede generar retrasos y errores aleatorios.
 > `collector` debe estar compilado en el mismo directorio desde el que se ejecuta `./main`, porque se lanza con `exec`.
 
 Cada ejecución agrega los spans válidos a `traces.log`. El archivo permanece
-después de finalizar el programa y contiene una línea serializada por span.
+después de finalizar el programa. En un archivo nuevo se escribe primero el
+encabezado de las nueve columnas y luego una línea serializada por span.
 
 ## Arquitectura de procesos
 
@@ -151,6 +152,15 @@ pueden completar el flujo y generar sus spans de pagos.
 El collector genera una alerta cuando un span tiene estado `ERROR` o cuando su
 duración supera los 300 ms. La alerta muestra el servicio, el Trace ID y el
 criterio que la originó.
+
+El texto de la alerta describe la situación funcional:
+
+- `pagos` con `ERROR`: el cobro no pudo completarse.
+- `inventario` con `ERROR`: no hay producto disponible.
+- `api` con `ERROR`: no se logró completar la solicitud final.
+- Duración en `pagos`: demora excesiva en el cobro.
+- Duración en `inventario`: demora excesiva al verificar disponibilidad.
+- Duración en `api`: demora excesiva en el flujo completo.
 
 Al finalizar la recolección se muestra un resumen con el número de solicitudes
 (Trace ID únicos), spans recibidos, alertas y trazas persistidas.
