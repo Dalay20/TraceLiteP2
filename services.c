@@ -18,7 +18,7 @@ static int contexto_parsear(const char *linea, char *trace, char *padre,
     copia[strcspn(copia, "\n")] = '\0';
     if (sscanf(copia, "%16[0-9a-fA-F]|%16[0-9a-fA-F]|%d%c",
                trace, padre, numero, &extra) != 3 ||
-        *numero < 1 || *numero > 4 ||
+        *numero < 1 || *numero > 5 ||
         !id_valido(trace) || !id_valido(padre)) {
         return -1;
     }
@@ -115,7 +115,7 @@ int servicio_inventario(int r_ai, int w_ib, int r_bi, int w_ia,
         return -1;
     }
     char linea[128];
-    int stock = 3;
+    int stock = 5;
 
     while (fgets(linea, sizeof(linea), in_a) != NULL) {
         char trace[ID_LEN], padre[ID_LEN];
@@ -197,7 +197,7 @@ int servicio_inventario(int r_ai, int w_ib, int r_bi, int w_ia,
 }
 
 /* ---------- Servicio B: pagos (span hijo de inventario) ---------- */
-int servicio_b(int r_ib, int w_bi, int w_spans) {
+int servicio_b(int r_ib, int w_bi, int w_spans, int modo_anomalo) {
     srand(getpid() ^ time(NULL));
     FILE *in = fdopen(r_ib, "r");
     if (in == NULL) {
@@ -228,9 +228,12 @@ int servicio_b(int r_ib, int w_bi, int w_spans) {
         s.inicio_ms = ahora_ms();
         trabajar_ms(50 + rand() % 100);
 
-        /* Anomalías: retraso aleatorio y/o error */
-        if (rand() % 100 < 25) trabajar_ms(300 + rand() % 200);
-        int error = (num == 3) || (rand() % 100 < 10);    /* la 3ª siempre falla */
+        int error = 0;
+        if (modo_anomalo) {
+            /* Anomalías: retraso aleatorio y/o error */
+            if (rand() % 100 < 25) trabajar_ms(300 + rand() % 200);
+            error = (num == 3) || (rand() % 100 < 10);
+        }
 
         s.fin_ms = ahora_ms();
         s.duracion_ms = s.fin_ms - s.inicio_ms;

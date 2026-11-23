@@ -1,0 +1,35 @@
+CHECKLIST DE ENTREGA FINAL - TRACELITE
+
+[x] Dos servicios/procesos hijos creados mediante fork().
+[x] Uso de exec() para iniciar el collector.
+[x] Comunicación IPC mediante pipes anónimas.
+[x] Cinco solicitudes procesadas.
+[x] Span raíz de api por solicitud.
+[x] Spans hijos de inventario y pagos por solicitud.
+[x] Trace ID común por solicitud.
+[x] Span ID y Parent Span ID.
+[x] Servicio, operación, inicio, fin, duración y estado.
+[x] Propagación de contexto entre procesos.
+[x] Recolección agrupada por Trace ID.
+[x] Visualización de relación padre-hijo.
+[x] Persistencia en traces.log.
+[x] Registros conservados después de finalizar.
+[x] Detección de estado ERROR.
+[x] Detección de duración superior a 300 ms.
+[x] Alerta con servicio, Trace ID y motivo.
+[x] Resumen de solicitudes, spans y alertas.
+[x] Caso normal sin alertas.
+[x] Caso anómalo con alerta.
+[x] Código fuente en C.
+[x] Makefile.
+[x] README.
+[x] Informe final.
+[x] Checklist.
+[ ] Video de 10 minutos.
+
+Comandos principales:
+
+    make clean
+    make CFLAGS="-Wall -Wextra -Werror -g"
+    ./main normal
+    ./main anomalous

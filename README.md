@@ -1,4 +1,4 @@
-# TraceLiteP2 – Avance parcial
+# TraceLiteP2 – Entrega final
 
 Primera versión funcional de un sistema ligero de trazabilidad distribuida en C para GNU/Linux, inspirado en OpenTelemetry y Grafana Tempo. Genera trazas entre procesos, las transmite a un recolector mediante pipes y las muestra en la terminal. No utiliza ningún SDK de OpenTelemetry ni de Tempo.
 
@@ -14,7 +14,7 @@ Primera versión funcional de un sistema ligero de trazabilidad distribuida en C
 |---|---|
 | `main.c` | Proceso principal: crea las pipes y los procesos hijos (`fork`/`exec`). |
 | `services.c` / `services.h` | Lógica de los servicios A (`api`), inventario y B (`pagos`). |
-| `collector.c` | Collector Lite: recibe los spans, los agrupa por Trace ID y los imprime. |
+| `collector.c` | Collector Lite: recibe, persiste, agrupa por Trace ID e imprime los spans. |
 | `span.h` | Estructura `Span`, medición de tiempo, generación de IDs y serialización. |
 | `Makefile` | Compilación del proyecto. |
 
@@ -36,9 +36,22 @@ make clean
 ./main
 ```
 
-El programa genera 4 solicitudes completas. Al finalizar, el collector imprime en la consola todas las trazas recibidas. Cada ejecución produce resultados distintos, porque los tiempos de respuesta y algunas anomalías son aleatorios.
+El programa genera 5 solicitudes completas por defecto. Se puede seleccionar el
+escenario:
+
+```bash
+./main normal
+./main anomalous
+```
+
+El escenario `normal` ejecuta las solicitudes sin errores ni retrasos
+anómalos. El escenario `anomalous` conserva la anomalía de la solicitud 3 y
+puede generar retrasos y errores aleatorios.
 
 > `collector` debe estar compilado en el mismo directorio desde el que se ejecuta `./main`, porque se lanza con `exec`.
+
+Cada ejecución agrega los spans válidos a `traces.log`. El archivo permanece
+después de finalizar el programa y contiene una línea serializada por span.
 
 ## Arquitectura de procesos
 
@@ -82,7 +95,8 @@ hasta enviar todos los bytes y gestiona interrupciones `EINTR`; cada mensaje
 individual sigue siendo menor que `PIPE_BUF`. Las respuestas,
 los contextos y los spans se validan antes de ser procesados. Los procesos
 reportan su PID y PPID por `stderr`, sin mezclar ese diagnóstico con la salida
-de spans del collector.
+de spans del collector. El collector persiste cada span válido en
+`traces.log` usando el mismo formato serializado que recibe por IPC.
 
 ## Formato del span
 
@@ -130,15 +144,21 @@ en los spans de inventario y A):
 - **Error:** con 10 % de probabilidad el estado es `ERROR`.
 - **Error garantizado:** la solicitud número 3 siempre termina en `ERROR`, para que la demostración incluya siempre una anomalía.
 
-El inventario inicia con tres unidades disponibles. Cada solicitud aprobada
-reserva una unidad antes de llamar a pagos; por ello, cuando se procesan cuatro
-solicitudes, la cuarta puede terminar con `ERROR` por falta de stock y no genera
-un span de pago.
+El inventario inicia con cinco unidades disponibles. Cada solicitud aprobada
+reserva una unidad antes de llamar a pagos, por lo que las cinco solicitudes
+pueden completar el flujo y generar sus spans de pagos.
+
+El collector genera una alerta cuando un span tiene estado `ERROR` o cuando su
+duración supera los 300 ms. La alerta muestra el servicio, el Trace ID y el
+criterio que la originó.
+
+Al finalizar la recolección se muestra un resumen con el número de solicitudes
+(Trace ID únicos), spans recibidos, alertas y trazas persistidas.
 
 ## Ejemplo de salida
 
 ```
-===== TraceLite: 11 spans recibidos =====
+===== TraceLite: 15 spans recibidos =====
 
 Trace 78953f5f7e6a1357
 └─ [api] recibir_solicitud       162.3 ms  OK    (span 2df404b1234c0d5b, padre: -)
@@ -150,7 +170,17 @@ Trace 00edba1d64fdc032
     └─ [pagos] cobrar             142.1 ms  ERROR (span 756b9dfd16554a12, padre: 6d18ea0069227993)
 ```
 
-## Estado del avance
+Resumen:
+
+```
+===== Resumen de ejecución =====
+Solicitudes: 5
+Spans recibidos: 15
+Alertas: 2
+Trazas persistidas: 5
+```
+
+## Checklist de la entrega
 
 **Implementado**
 
@@ -161,8 +191,22 @@ Trace 00edba1d64fdc032
 - [x] Verificación de stock antes del pago
 - [x] Comunicación por pipes hacia el collector
 - [x] Visualización en terminal agrupada por Trace ID con relación padre-hijo
-- [x] Cuatro solicitudes completas con anomalías de tiempo y de error
+- [x] Cinco solicitudes completas
+- [x] Escenarios normal y anómalo reproducibles
+- [x] Persistencia de spans en `traces.log`
+- [x] Detección de anomalías y alertas en terminal
+- [x] Resumen final de solicitudes, spans y alertas
 
-**Pendiente para la entrega final**
+Los detalles de cumplimiento y las evidencias se encuentran en
+[`Informe_Avance_Final.txt`](Informe_Avance_Final.txt) y
+[`Checklist_Entrega_Final.txt`](Checklist_Entrega_Final.txt).
 
-- [ ] Completar según los requisitos de la entrega final (por definir)
+- [x] Dos servicios/procesos hijos, `fork()`, `exec()` e IPC funcional
+- [x] Cinco solicitudes con spans correlacionados por solicitud
+- [x] Campos completos, propagación de contexto y duración medida
+- [x] Recolección y visualización agrupada por Trace ID
+- [x] Persistencia de spans en `traces.log`
+- [x] Anomalías detectadas y alertas visibles
+- [x] Resumen final de solicitudes, spans y alertas
+- [x] Código fuente, Makefile, README, informe y checklist
+- [ ] Video de 10 minutos

@@ -2,11 +2,12 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <signal.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include "services.h"
 
-#define N_SOLICITUDES 4
+#define N_SOLICITUDES 5
 
 static int esperar(pid_t pid, const char *nombre) {
     int status;
@@ -26,7 +27,17 @@ static int esperar(pid_t pid, const char *nombre) {
     return 0;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    int modo_anomalo = 1;
+    if (argc > 2 ||
+        (argc == 2 && strcmp(argv[1], "normal") != 0 &&
+         strcmp(argv[1], "anomalous") != 0)) {
+        fprintf(stderr, "Uso: %s [normal|anomalous]\n", argv[0]);
+        return 2;
+    }
+    if (argc == 2 && strcmp(argv[1], "normal") == 0)
+        modo_anomalo = 0;
+
     signal(SIGPIPE, SIG_IGN);
     int pipe_spans[2], pipe_ai[2], pipe_ib[2], pipe_bi[2], pipe_ia[2];
     if (pipe(pipe_spans) == -1 || pipe(pipe_ai) == -1 || pipe(pipe_ib) == -1 ||
@@ -66,7 +77,8 @@ int main(void) {
         close(pipe_ib[1]);
         close(pipe_bi[0]);
         close(pipe_ia[0]);
-        _exit(servicio_b(pipe_ib[0], pipe_bi[1], pipe_spans[1]) == 0 ? 0 : 1);
+        _exit(servicio_b(pipe_ib[0], pipe_bi[1], pipe_spans[1],
+                         modo_anomalo) == 0 ? 0 : 1);
     }
 
     /* --- Servicio I: inventario --- */

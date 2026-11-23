@@ -1,0 +1,149 @@
+INFORME FINAL - TRACELITE
+
+1. Descripción
+--------------
+
+TraceLite es un sistema ligero de trazabilidad distribuida implementado en C
+para GNU/Linux. Está inspirado en los conceptos de trazas de OpenTelemetry y
+en el almacenamiento de Grafana Tempo. El sistema genera contexto de
+trazabilidad, lo propaga entre procesos, recolecta los spans, los muestra
+agrupados por Trace ID y los persiste en un archivo de texto.
+
+La ejecución procesa cinco solicitudes. Cada solicitud recorre api,
+inventario y pagos, generando un span raíz y dos spans hijos relacionados.
+
+2. Arquitectura de procesos e IPC
+----------------------------------
+
+main crea las pipes y cuatro procesos hijos:
+
+    main
+    |-- fork + exec -> collector
+    |-- fork -------> pagos
+    |-- fork -------> inventario
+    `-- fork -------> api
+
+El flujo de una solicitud es:
+
+    api -> inventario -> pagos -> respuesta a api
+
+Las pipes anónimas utilizadas son:
+
+- pipe_ai: api envía Trace ID, Span ID y número de solicitud a inventario.
+- pipe_ib: inventario envía el contexto validado a pagos.
+- pipe_bi: pagos devuelve OK o ERROR a inventario.
+- pipe_ia: inventario devuelve el resultado final a api.
+- pipe_spans: api, inventario y pagos envían spans al collector.
+
+El collector recibe pipe_spans mediante su entrada estándar. main conecta la
+pipe con dup2() y ejecuta el binario collector mediante execl().
+
+3. Formato y propagación del span
+----------------------------------
+
+Cada span se serializa con nueve campos:
+
+    trace_id|span_id|parent_span_id|servicio|operacion|inicio_ms|fin_ms|duracion_ms|estado
+
+Los tiempos se miden con clock_gettime(CLOCK_MONOTONIC) y la duración se
+calcula como fin_ms - inicio_ms.
+
+api crea el Trace ID y el Span ID raíz. inventario conserva el Trace ID y usa
+el Span ID de api como parent_span_id. pagos conserva el mismo Trace ID y usa
+el Span ID de inventario como parent_span_id. Por tanto, la relación queda:
+
+    api -> inventario -> pagos
+
+4. Persistencia
+--------------
+
+El collector abre traces.log en modo append. Cada span válido se vuelve a
+serializar y se escribe en una línea del archivo. Los registros permanecen
+después de terminar el programa y las ejecuciones posteriores se agregan sin
+sobrescribir los datos anteriores.
+
+La persistencia se realiza en el collector porque este proceso recibe todos
+los spans y centraliza la validación, visualización y almacenamiento.
+
+5. Anomalías y alertas
+----------------------
+
+El modo anomalous conserva una anomalía determinista: la solicitud 3 termina
+con estado ERROR en pagos. También puede producir:
+
+- retrasos aleatorios de 300 a 500 ms;
+- errores aleatorios con probabilidad del 10 %.
+
+El collector genera una alerta cuando:
+
+- el estado del span es ERROR; o
+- su duración supera 300 ms.
+
+Cada alerta muestra el servicio, el Trace ID y el motivo detectado.
+
+El modo normal desactiva estas anomalías para permitir una prueba sin alertas.
+
+6. Resumen de ejecución
+-----------------------
+
+Al finalizar, el collector informa:
+
+- solicitudes: cantidad de Trace ID únicos;
+- spans recibidos: cantidad de spans válidos recolectados;
+- alertas: cantidad de anomalías detectadas;
+- trazas persistidas: cantidad de Trace ID únicos almacenados en la ejecución.
+
+7. Pruebas ejecutadas
+---------------------
+
+Compilación estricta:
+
+    make clean
+    make CFLAGS="-Wall -Wextra -Werror -g"
+
+Caso normal:
+
+    rm -f traces.log
+    ./main normal
+
+Resultado esperado:
+
+    Solicitudes: 5
+    Spans recibidos: 15
+    Alertas: 0
+    Trazas persistidas: 5
+
+Caso anómalo:
+
+    ./main anomalous
+
+Resultado esperado:
+
+    Solicitudes: 5
+    Spans recibidos: 15
+    Alertas: al menos 1
+    Trazas persistidas: 5
+
+Persistencia:
+
+    wc -l traces.log
+
+Una ejecución normal agrega 15 líneas al archivo. Una ejecución anómala
+posterior agrega otras 15 líneas sin eliminar las anteriores.
+
+8. Limitaciones
+---------------
+
+- Los IDs se generan con rand(), por lo que su unicidad es probabilística.
+- El archivo traces.log utiliza texto delimitado y no una base de datos.
+- El video de demostración debe elaborarse como entregable externo al código.
+
+9. Referencias
+--------------
+
+1. OpenTelemetry, Traces:
+   https://opentelemetry.io/docs/concepts/signals/traces/
+2. OpenTelemetry, Context propagation:
+   https://opentelemetry.io/docs/concepts/context-propagation/
+3. Grafana Tempo:
+   https://grafana.com/docs/tempo/latest/

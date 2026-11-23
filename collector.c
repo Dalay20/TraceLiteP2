@@ -6,9 +6,27 @@
 #include "span.h"
 
 #define MAX_SPANS 256
+#define TRACE_LOG "traces.log"
+#define UMBRAL_DURACION_MS 300.0
 
 static Span spans[MAX_SPANS];
 static int n = 0;
+static int alertas = 0;
+
+static void detectar_anomalia(const Span *span) {
+    const char *motivo = NULL;
+    if (strcmp(span->estado, "ERROR") == 0) {
+        motivo = "estado ERROR";
+    } else if (span->duracion_ms > UMBRAL_DURACION_MS) {
+        motivo = "duración superior a 300 ms";
+    }
+
+    if (motivo != NULL) {
+        printf("[ALERTA] servicio=%s trace_id=%s motivo=%s\n",
+               span->servicio, span->trace_id, motivo);
+        alertas++;
+    }
+}
 
 /* Convierte una línea "a|b|c|..." en un Span.
    Usamos strsep porque el parent_span_id puede venir vacío ("||"),
@@ -71,9 +89,29 @@ static void imprimir_arbol(const char *trace, const char *padre, int nivel) {
     }
 }
 
+static int contar_trazas(void) {
+    int total = 0;
+    for (int i = 0; i < n; i++) {
+        int repetido = 0;
+        for (int j = 0; j < i; j++) {
+            if (strcmp(spans[j].trace_id, spans[i].trace_id) == 0) {
+                repetido = 1;
+                break;
+            }
+        }
+        if (!repetido) total++;
+    }
+    return total;
+}
+
 int main(void) {
     char linea[512];
     int invalidas = 0;
+    FILE *persistencia = fopen(TRACE_LOG, "a");
+    if (persistencia == NULL) {
+        perror("fopen traces.log");
+        return 1;
+    }
 
     /* 1. Recolectar hasta EOF */
     while (fgets(linea, sizeof(linea), stdin) != NULL) {
@@ -81,11 +119,30 @@ int main(void) {
             invalidas++;
             continue;
         }
-        if (span_parsear(linea, &spans[n]) == 0) n++;
-        else invalidas++;
+        if (span_parsear(linea, &spans[n]) == 0) {
+            char serializado[512];
+            int longitud = span_serializar(&spans[n], serializado,
+                                           sizeof(serializado));
+            if (longitud < 0 || (size_t)longitud >= sizeof(serializado) ||
+                fputs(serializado, persistencia) == EOF ||
+                fflush(persistencia) == EOF) {
+                perror("persistencia de span");
+                fclose(persistencia);
+                return 1;
+            }
+            detectar_anomalia(&spans[n]);
+            n++;
+        } else {
+            invalidas++;
+        }
     }
     if (ferror(stdin)) {
         perror("fgets collector");
+        fclose(persistencia);
+        return 1;
+    }
+    if (fclose(persistencia) == EOF) {
+        perror("fclose traces.log");
         return 1;
     }
     if (invalidas > 0)
@@ -102,5 +159,12 @@ int main(void) {
         printf("\nTrace %s\n", spans[i].trace_id);
         imprimir_arbol(spans[i].trace_id, "", 0);   /* "" = span raíz */
     }
+
+    int solicitudes = contar_trazas();
+    printf("\n===== Resumen de ejecución =====\n");
+    printf("Solicitudes: %d\n", solicitudes);
+    printf("Spans recibidos: %d\n", n);
+    printf("Alertas: %d\n", alertas);
+    printf("Trazas persistidas: %d\n", solicitudes);
     return 0;
 }
