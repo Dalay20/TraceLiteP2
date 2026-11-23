@@ -1,0 +1,303 @@
+PITCH DE PRESENTACION - TRACELITE
+Duracion total: 10 minutos
+
+============================================================
+PRIMEROS 5 MINUTOS: EXPLICACION DEL PROYECTO
+============================================================
+
+[0:00 - 0:20] INTRODUCCION
+
+Hola, somos el equipo de TraceLite.
+
+TraceLite es un sistema de trazabilidad distribuida en C para GNU/Linux.
+Permite seguir una solicitud entre procesos, relacionar sus spans y detectar
+anomalias sin utilizar los SDK de OpenTelemetry o Grafana Tempo.
+
+Mostrar:
+- README.md: descripcion breve del proyecto.
+
+[0:20 - 1:20] OBJETIVO Y ARQUITECTURA
+
+El objetivo de esta version es demostrar que una solicitud puede recorrer
+varios servicios independientes, conservar un mismo Trace ID, generar spans
+relacionados y enviar esos spans a un proceso recolector.
+
+La arquitectura esta formada por:
+
+- main, que crea las pipes y coordina los procesos;
+- api, que representa el Servicio A y crea el span raiz;
+- inventario, que valida la disponibilidad del producto;
+- pagos, que representa el Servicio B y simula el cobro;
+- collector, que recibe, valida, persiste y visualiza los spans.
+
+El proceso principal crea los hijos mediante fork(). El collector se inicia
+con fork() y exec(), cumpliendo el requisito de reemplazar un proceso por el
+componente ejecutable del recolector.
+
+El flujo de una solicitud es:
+
+    api -> inventario -> pagos -> respuesta a api
+
+El flujo de los spans es:
+
+    api, inventario y pagos -> collector
+
+Mostrar:
+- main.c: definicion de N_SOLICITUDES y creacion de las pipes.
+- main.c: bloques de fork() para collector, pagos, inventario y api.
+- main.c: llamada execl("./collector", "collector", NULL).
+- README.md: diagrama de arquitectura.
+
+[1:20 - 2:20] COMUNICACION ENTRE PROCESOS
+
+Para la comunicacion usamos pipes anonimas, porque los procesos son locales,
+se crean mediante fork() y necesitan intercambiar mensajes de forma directa.
+No usamos memoria compartida porque el flujo es secuencial y los mensajes son
+cortos; tampoco usamos sockets porque no necesitamos comunicacion de red.
+Las pipes principales son:
+
+- pipe_ai: api envia el contexto a inventario;
+- pipe_ib: inventario envia el contexto validado a pagos;
+- pipe_bi: pagos devuelve el resultado del cobro;
+- pipe_ia: inventario devuelve el resultado final a api;
+- pipe_spans: los tres servicios envian sus spans al collector.
+
+El collector recibe la pipe de spans como entrada estandar mediante dup2()
+antes de ejecutar exec().
+
+Los mensajes se envian como lineas de texto separadas por el caracter `|`,
+llamado barra vertical o barra separadora.
+Ademas, se utiliza write_all() para asegurarse de que los mensajes se envien
+completos, incluso si una escritura es interrumpida.
+
+Mostrar:
+- main.c: declaracion de pipe_spans, pipe_ai, pipe_ib, pipe_bi y pipe_ia.
+- main.c: dup2() y execl() del collector.
+- services.c: write_all() al enviar contexto y respuestas.
+- span.h: funcion write_all().
+
+[2:20 - 3:25] MODELO DE TRAZAS Y PROPAGACION
+
+Cada solicitud genera un Trace ID nuevo.
+
+El servicio api crea:
+
+- el Trace ID;
+- su propio Span ID;
+- un span raiz sin Parent Span ID.
+
+Cuando api envia la solicitud a inventario, transmite el Trace ID y su Span ID.
+Inventario conserva el Trace ID y usa el Span ID de api como su padre. Luego
+genera su propio Span ID y lo transmite a pagos.
+
+Pagos vuelve a conservar el Trace ID, usa el Span ID de inventario como padre y
+genera un Span ID propio.
+
+Por eso la jerarquia final de cada solicitud es:
+
+    api
+    └── inventario
+        └── pagos
+
+Cada span registra:
+
+Trace ID, Span ID, Parent Span ID, servicio, operacion, inicio, fin, duracion
+en milisegundos y estado OK o ERROR.
+
+Los tiempos se miden durante la ejecucion con clock_gettime(CLOCK_MONOTONIC).
+
+Mostrar:
+- span.h: estructura Span con los nueve campos.
+- span.h: ahora_ms() con CLOCK_MONOTONIC.
+- span.h: span_serializar().
+- services.c: servicio_a() cuando genera el span raiz.
+- services.c: servicio_inventario() y servicio_b() cuando asignan
+  parent_span_id y generan su propio Span ID.
+
+[3:25 - 4:30] PERSISTENCIA Y DETECCION DE ANOMALIAS
+
+El collector persiste los spans en el archivo traces.log.
+
+El archivo se abre en modo append. Si esta vacio, se escribe el encabezado;
+despues cada span valido se guarda en una linea. De esta manera, los registros
+permanecen despues de que termina el programa y las ejecuciones posteriores
+se agregan sin borrar las anteriores.
+
+El sistema tiene dos modos de ejecucion:
+
+- normal, sin errores ni retrasos anomalos;
+- anomalous, con la simulacion de errores y retrasos.
+
+En el modo anomalous, la solicitud numero 3 genera de forma determinista un
+error en pagos. Tambien existe un retraso aleatorio de entre 300 y 500
+milisegundos y una probabilidad adicional de error.
+
+El collector genera una alerta cuando:
+
+- el estado del span es ERROR; o
+- su duracion supera los 300 milisegundos.
+
+La alerta muestra el servicio, el Trace ID y el motivo de la anomalía.
+
+Mostrar:
+- collector.c: apertura de traces.log en modo append.
+- collector.c: span_parsear() para validar los nueve campos.
+- collector.c: detectar_anomalia() y el umbral de 300 ms.
+- services.c: solicitud numero 3, retraso aleatorio y estado ERROR.
+- Informe_Avance_Final.txt: justificacion de persistencia y criterio de alerta.
+
+[4:30 - 5:00] RESUMEN DE LA SOLUCION
+
+Mientras se muestra el checklist, decir:
+
+En resumen, TraceLite demuestra:
+
+- procesos independientes creados con fork();
+- uso de exec() para iniciar el collector;
+- comunicacion IPC mediante pipes;
+- propagacion de contexto entre servicios;
+- cinco solicitudes correlacionadas;
+- spans medidos en tiempo real;
+- persistencia en traces.log;
+- visualizacion agrupada por Trace ID;
+- deteccion de errores y retrasos;
+- resumen final de solicitudes, spans y alertas.
+
+Los archivos principales que acabamos de revisar son main.c, services.c,
+span.h y collector.c. En los siguientes cinco minutos veremos la ejecucion
+real y comprobaremos los resultados.
+
+Mostrar:
+- Checklist_Entrega_Final.txt: requisitos implementados y video pendiente.
+- README.md: comandos de compilacion y ejecucion.
+
+============================================================
+ULTIMOS 5 MINUTOS: DEMOSTRACION DEL SISTEMA
+============================================================
+
+[5:00 - 5:30] COMPILACION
+
+Primero mostramos el contenido del proyecto y compilamos con el Makefile.
+
+Ejecutamos:
+
+    make clean
+    make CFLAGS="-Wall -Wextra -Werror -g"
+
+La compilacion genera los ejecutables main y collector.
+Las opciones -Wall, -Wextra y -Werror permiten verificar que el codigo no
+tenga advertencias del compilador.
+
+[5:30 - 6:00] EJECUCION DEL CASO NORMAL
+
+Para demostrar el caso normal ejecutamos:
+
+    rm -f traces.log
+    ./main normal
+
+En la salida se observan los PID de collector, pagos, inventario y api.
+Esto confirma que los componentes se ejecutan como procesos independientes.
+
+El collector muestra cada traza agrupada por su Trace ID.
+En cada arbol se observa:
+
+    api -> inventario -> pagos
+
+Tambien se muestran el servicio, la operacion, la duracion, el estado, el
+Span ID y el Parent Span ID.
+
+[6:00 - 7:00] REVISION DEL CASO NORMAL
+
+En el resumen final debemos observar:
+
+    Solicitudes: 5
+    Spans recibidos: 15
+    Alertas: 0
+    Trazas persistidas: 5
+
+Esto significa que se procesaron cinco solicitudes completas y que cada una
+genero tres spans: uno de api, uno de inventario y uno de pagos.
+
+Ahora mostramos el archivo persistido:
+
+    wc -l traces.log
+    head traces.log
+
+El archivo contiene el encabezado y las quince lineas de spans.
+Para verificar la correlacion, observamos que los tres spans de una misma
+traza tienen el mismo Trace ID.
+
+El span de api tiene Parent Span ID vacio.
+El span de inventario tiene como padre el Span ID de api.
+El span de pagos tiene como padre el Span ID de inventario.
+
+[7:00 - 7:30] EJECUCION DEL CASO ANOMALO
+
+Ahora ejecutamos el escenario anomalous:
+
+    ./main anomalous
+
+Este modo mantiene la misma arquitectura, pero habilita la simulacion de
+errores y retrasos.
+
+La solicitud numero 3 esta configurada para producir un error en pagos.
+Ademas, algunas solicitudes pueden tener un retraso aleatorio superior a
+300 milisegundos.
+
+[7:30 - 8:30] OBSERVACION DE LAS ALERTAS
+
+En la salida del collector aparecen mensajes como:
+
+    [ALERTA] servicio=pagos trace_id=...
+
+La alerta identifica exactamente el servicio afectado y el Trace ID de la
+solicitud. Si el error se propaga, tambien puede aparecer una alerta para el
+span de api.
+
+Despues se muestra nuevamente el arbol de trazas. En la solicitud anomalica
+el span de pagos aparece con estado ERROR, y el span de api refleja el
+resultado final de la solicitud.
+
+Si la anomalia es un retraso, el span correspondiente muestra una duracion
+superior a 300 milisegundos y el collector informa una alerta de demora.
+
+[8:30 - 9:15] VERIFICACION DE PERSISTENCIA
+
+La ejecucion anomalous agrega nuevos registros sin borrar los anteriores.
+
+Podemos comprobarlo con:
+
+    wc -l traces.log
+    tail traces.log
+
+Despues de ejecutar ambos escenarios, el archivo debe contener el encabezado
+y treinta spans: quince del caso normal y quince del caso anomalous.
+
+Esto demuestra que la persistencia ocurre realmente en el collector y que los
+registros permanecen despues de finalizar los procesos.
+
+[9:15 - 9:45] VERIFICACION DE LA RELACION PADRE-HIJO
+
+Tomamos una de las trazas mostradas y verificamos:
+
+1. El Trace ID es igual en api, inventario y pagos.
+2. api no tiene padre porque es el span raiz.
+3. Parent Span ID de inventario coincide con Span ID de api.
+4. Parent Span ID de pagos coincide con Span ID de inventario.
+5. La duracion se calcula como fin menos inicio.
+
+Con esto comprobamos que no son trazas ficticias: los spans fueron generados
+por procesos diferentes y llegaron al collector mediante IPC.
+
+[9:45 - 10:00] CIERRE
+
+Con esta demostracion comprobamos que TraceLite cumple el objetivo del avance
+final: procesar solicitudes entre servicios independientes, propagar el
+contexto, recolectar spans, persistirlos, mostrar su jerarquia y detectar
+anomalias.
+
+Como trabajo futuro se podria reemplazar el archivo de texto por una base de
+datos o agregar un dashboard, pero la funcionalidad minima solicitada ya esta
+implementada.
+
+Muchas gracias.
