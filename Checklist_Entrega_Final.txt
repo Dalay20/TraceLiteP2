@@ -25,7 +25,7 @@ CHECKLIST DE ENTREGA FINAL - TRACELITE
 [x] README.
 [x] Informe final.
 [x] Checklist.
-[ ] Video de 10 minutos.
+[x] Video de 10 minutos.
 
 Comandos principales:
 
